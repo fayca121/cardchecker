@@ -1,12 +1,12 @@
 package controllers
 
 import (
+	"encoding/json"
+	"io"
 	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
-
-	"github.com/gin-gonic/gin"
 )
 
 type cardNumberRequest struct {
@@ -19,41 +19,60 @@ type cardNumberResponse struct {
 	Network string `json:"network,omitempty"`
 }
 
-func CheckCardNumber(context *gin.Context) {
+func CheckCardNumber(w http.ResponseWriter, r *http.Request) {
 
-	var data cardNumberRequest
+	if r.Method != http.MethodPost {
+		http.NotFound(w, r)
+		return
+	}
+	var req cardNumberRequest
 
-	if err := context.ShouldBindJSON(&data); err != nil {
-		context.JSON(http.StatusBadRequest, gin.H{"error": err})
+	w.Header().Set("Content-Type", "application/json")
+
+	defer func(body io.ReadCloser) {
+		err := body.Close()
+		if err != nil {
+			panic(err)
+		}
+	}(r.Body)
+
+	body, err := io.ReadAll(r.Body)
+
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	r := strings.NewReplacer(" ", "", "-", "")
+	if err := json.Unmarshal(body, &req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 
-	cardNumber := r.Replace(data.CardNumber)
+	rp := strings.NewReplacer(" ", "", "-", "")
+
+	cardNumber := rp.Replace(req.CardNumber)
 
 	isNumeric := regexp.MustCompile(`^[0-9]+$`).MatchString(cardNumber)
 
 	if len(cardNumber) < 8 || len(cardNumber) > 19 || !isNumeric {
-		context.JSON(http.StatusBadRequest, gin.H{"error": "Invalid card number"})
+		http.Error(w, "Invalid card number", http.StatusBadRequest)
 		return
 	}
 
-	result := isValidCardNumber(cardNumber)
+	resp := cardNumberResponse{
+		cardNumberRequest: req,
+		Valid:             isValidCardNumber(cardNumber),
+		Network:           getNetWorkName(cardNumber),
+	}
 
-	var response cardNumberResponse
-
-	response.CardNumber = data.CardNumber
-	response.Valid = result
-
-	if !result {
-		context.JSON(http.StatusBadRequest, response)
-
-	} else {
-		// add more card number info
-
-		response.Network = getNetWorkName(cardNumber)
-		context.JSON(http.StatusOK, response)
+	b, err := json.Marshal(resp)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	_, err = w.Write(b)
+	if err != nil {
+		panic(err)
 	}
 }
 
@@ -117,16 +136,16 @@ func getNetWorkName(cardNumber string) string {
 		"357111": "LankaPay",
 		"9704":   "Napas",
 	}
-	for iin, netw := range issuingNetwork {
+	for iin, net := range issuingNetwork {
 		if strings.Contains(iin, "_") {
 			inf, sup := getRange(iin)
 			for i := inf; i <= sup; i++ {
 				if strings.HasPrefix(cardNumber, strconv.Itoa(i)) {
-					return netw
+					return net
 				}
 			}
 		} else if strings.HasPrefix(cardNumber, iin) {
-			return netw
+			return net
 		}
 	}
 

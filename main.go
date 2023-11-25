@@ -2,15 +2,15 @@ package main
 
 import (
 	"github.com/fayca121/cardchecker/src/controllers"
-	"github.com/gin-gonic/gin"
+	"log"
+	"net/http"
 )
 
 func main() {
+	http.HandleFunc("/check", controllers.CheckCardNumber)
 
-	route := gin.Default()
-
-	route.POST("/check", controllers.CheckCardNumber)
-
-	route.Run()
+	if err := http.ListenAndServe(":8080", nil); err != nil {
+		log.Fatal(err)
+	}
 
 }
